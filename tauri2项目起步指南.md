@@ -319,8 +319,9 @@ paim 的 `package.json` scripts（可直接照搬，只改项目名字符串）�
 | `e2e` | `playwright test --config e2e/playwright.config.ts` |
 | `check` | `format → build:rs → gen:bindings → lint → lint:e2e-locators → typecheck → test → build` |
 
-- **`quick` 是日常入口**：改完先跑，秒级反馈（格式检查、lint、类型、Rust 编译、测试编译）；它只检查不改文件，也不跑测试。
-- **`check` 是收尾唯一入口**：它保证「代码格式 + Rust 能编 + bindings 是最新的 + 前后端类型都对 + 单元测试通过 + 前端能构建」。提交前跑它，能挡掉绝大多数「编译过但功能不对」。
+- **分工（一句话）**：`quick` = 改代码过程中的**只读**体检（不改任何文件、不产 exe、不跑测试，秒级）；`check` = **提交前唯一出口**（会改文件：oxfmt 重排 + `gen:bindings` 复写 `src/bindings.ts`；会跑 `test` 与 `build`）。
+- **收尾只跑 `check`**：它是 `quick` 的超集（`format` ⊃ `format:check`、`build:rs` ⊃ `check:rs`），所以收尾不必先跑 `quick`，也不必再单独跑 `gen:bindings`——`check` 成功即意味着 bindings 已是最新。
+- **日常只跑 `quick`，但它不能替代 `check`**：不跑 `test` / `build`、不复写 bindings。唯一需要手动插一步的场景是「改了 Rust 命令签名 / 公共 API，却只想跑 `quick`」→ 先 `pnpm build:rs && pnpm gen:bindings`：`quick` 只做 `cargo check`（不产 exe），而 gen 依赖最新的 debug 二进制，否则会**静默写出旧 bindings**。
 - `test` 里前端在前（快、先失败早停），Rust 测试在后。
 - **`lint:e2e-locators` 是 e2e 的静态门**：Playwright 的名称匹配（`getByRole` 的 `name`、`getByText/Title/Label/AltText/Placeholder`）默认是**子串**，两个详情弹窗共用一套按钮名时必然互相吞并（`收藏` ⊂ `取消收藏`、`关闭` ⊂ `关闭查找`、`提示词内容` ⊂ `以提示词内容搜索相似项`），既会误红也会误绿。脚本默认只查详情作用域（变量名白名单），`--all` 看页面级历史欠账；确需子串的调用在该行注释 `locator-allow-substring` 豁免。落地顺序：先 `--fix` 一次性补 `exact`（改完跑全量 e2e），再挂进 `quick` / `check` 防回退。实现见 paim `scripts/check-e2e-locators.mjs`。
 
@@ -415,3 +416,4 @@ dist/
 | e2e 并行模型、测试缝、失败排查 | `docs/e2e测试.md` |
 | 踩坑记录（含 target、e2e 收尾等） | `docs/lessons.md` |
 | Agent 环境要点（含 CARGO_TARGET_DIR） | `AGENTS.md` |
+| 日常 / 收尾质量门分工（`quick` 只读、`check` 全量、何时才需手动 `gen:bindings`） | `AGENTS.md`「质量门与 bindings」一节 |
