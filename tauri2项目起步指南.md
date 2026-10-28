@@ -10,14 +10,14 @@
 | --- | --- | --- |
 | 包管理 | pnpm 12 + `packageManager` pin | 建议统一 |
 | 版本单一事实源 | `src-tauri/tauri.conf.json` 的 `version` 指向 `../package.json` | 建议统一 |
-| tauri 版本栈 | Rust `tauri 2.12.0` / `tauri-build 2.7.0`；npm `@tauri-apps/api`、`@tauri-apps/cli` 均 2.12.0（CLI 须与 tauri 同 minor）；直接依赖 `windows` 跟随 tauri（0.62） | 建议统一 |
+| tauri 版本栈（**写死**） | Rust `tauri =2.12.5` / `tauri-build =2.7.4`；npm `@tauri-apps/api`、`@tauri-apps/cli` 均 `2.12.4`（不用 `^`）；直接依赖 `windows =0.62.2`（跟随 tauri） | 建议统一 |
 | Rust 目录分层 | `src-tauri/src/{commands,domain,infra}`（分层即目录名） | 建议统一 |
 | cargo target | `CARGO_TARGET_DIR` 指向共享目录；辅助脚本必须读该环境变量 | 建议统一 |
 | bindings | tauri-specta rc.25 + **运行期导出**（含 `PAIM_EXPORT_BINDINGS` 导出即退） | 建议统一 |
 | 权限 | `capabilities/default.json` 精确清单 + `build.removeUnusedCommands` | 建议统一 |
 | CSP | 生产严格、`devCsp` 放宽（含 ws / devUrl） | 建议统一 |
 | 本地文件加载 | `assetProtocol.enable` + 空 `scope` + 运行期 `allow_directory` | 建议统一 |
-| 插件组合 | dialog / single-instance / global-shortcut（+ `tray-icon`、`protocol-asset` 特性；`tauri-plugin-log` 仅在 debug 构建里输出终端） | 建议统一（按需增减） |
+| 插件组合 | dialog / single-instance / global-shortcut（+ `tray-icon` 特性；`protocol-asset` 仅当配置启用 `assetProtocol`；`tauri-plugin-log` 仅在 debug 构建里输出终端） | 建议统一（按需增减） |
 | 日志 | 自研 `infra/logging.rs` 写文件（`paim.log`）+ 配置文件分级（`paim-config.toml`） | 建议统一 |
 | 环境变量前缀 | `PAIM_*`、`VITE_PORT`、`TAURI_DEV_HOST` | 可不同（换自己的前缀） |
 | 应用标识 | `productName` / `identifier` / 窗口标题尺寸 / bundle targets / 图标 | 可不同 |
@@ -33,12 +33,46 @@
 - Node：`package.json` 里不必写 `engines`；Node ≥ 22.13 只在使用 npm 安装 pnpm 时需要（pnpm 12 自身不依赖 Node）。
 - **版本号只维护一处**：`package.json.version`；`tauri.conf.json` 用 `"version": "../package.json"` 引用它（paim 做法）。`src-tauri/Cargo.toml` 的 `version` 不参与发布，paim 里长期是初始值 `0.1.0`，保持一致即可。
 - 改版本号后**必须重启 vite**：paim 的 vite watch 白名单不含 `package.json`，否则前端 `__APP_VERSION__` 仍是旧值。
-- **tauri 版本栈按同一 minor 对齐**：Rust 侧 `tauri = "2.12.0"` / `tauri-build = "2.7.0"`，npm 侧 `@tauri-apps/api`、`@tauri-apps/cli` 同为 2.12.0；CLI 与 tauri 主版本不一致时，`pnpm dev` 启动会报版本不匹配（paim 的 tauri 特性开关见第 5 节末）。
-- **声明值是区间下限，不是实际版本**：`tauri = "2.12.0"` 等价 `^2.12.0`（≥2.12.0、<3.0.0），实际用哪一版由 `Cargo.lock` 决定——带 lock 构建时根本读不到 manifest 的下限，所以**应用类项目的 `Cargo.lock` 必须入库**（paim 已入库），它才是防版本漂移的主力，不该写进 `.gitignore`。
-- **下限只在「重解析」时起作用**：新项目照抄 manifest 却没带 lock、lock 被删、`cargo update`（全量或 `-p`）、新增依赖触发重算——这几种场景下限才决定「最低能取到哪一版」；`cargo update --precise` 指定低于下限的版本会被直接拒绝。
-- **升级后要不要跟着抬下限**：不抬也能跑（2.12 落在 `^2.10.3` 区间内，重算 lock 即可），但抬到与实际一致能消除「声明 ≠ 实测」的歧义，也避免丢 lock 的环境解析出另一套 tauri 栈（共享 target 会把两套产物并存，白占磁盘）。抬下限**挡不住往上漂**（新版本发布后重解析照旧浮上去），要绝对锁死得写成 `=2.12.0`；tauri 是主框架，不建议——保持 caret 才能自动吃到 patch 级安全修复（这一点与 specta 三件套刻意精确锁版不同）。
-- **升级方式与连锁**：`cargo update -p tauri --precise 2.12.0`；tauri 前移会连带 wry 0.57 / tao 0.37 / windows 0.62 同批前移，属正常现象，不要手改 `Cargo.lock`。
-- **直接依赖 `windows` 的版本跟着 tauri 走**：paim 用 `windows` 调 Shell API 定位文件，声明与 tauri 依赖的 windows 同 minor（2.12 系 → `windows = "0.62"`），否则同一 crate 会被编两份；升级 tauri 后用 `cargo tree -i windows` 核对只剩一份。
+### 1.1 当前版本基线（2026-10-28 实测，三个项目已对齐；全部写死）
+
+Rust（`src-tauri/Cargo.toml`，一律 `=x.y.z`）：
+
+| crate | 版本 | 备注 |
+| --- | --- | --- |
+| tauri | **2.12.5** | `tray-icon` 必开；`protocol-asset` 仅当配置启用 `assetProtocol` |
+| tauri-build | **2.7.4** | |
+| tauri-plugin-dialog | **2.8.4** | npm 侧同版本 |
+| tauri-plugin-global-shortcut | **2.4.1** | 无 npm 包 |
+| tauri-plugin-log | **2.10.1** | 无 npm 包 |
+| tauri-plugin-single-instance | **2.5.5** | 无 npm 包 |
+| tauri-plugin-autostart | **2.7.0** | 按需；npm 侧同版本 |
+| tauri-plugin-window-state | **2.5.0** | 按需；无 npm 包 |
+| thiserror | **2.0.21** | |
+| toml | **0.8.2** | 直接依赖保持 0.8 API，别跟着传递的 1.1.8 升 |
+| serde / serde_json | **1.0.229 / 1.0.154** | |
+| chrono / log | **0.4.45 / 0.4.34** | |
+| zip | **4.6.1** | 按需 |
+| windows | **0.62.2** | 仅直接调用 Win32 时声明，与 tauri 同 minor |
+| tauri-specta / specta / specta-typescript | **2.0.0-rc.25 / 2.0.0-rc.25 / 0.0.12** | rc 三件套必须一起改 |
+
+npm（`package.json`，不带 `^`）：
+
+| 包 | 版本 |
+| --- | --- |
+| @tauri-apps/api | **2.12.4** |
+| @tauri-apps/cli | **2.12.4** |
+| @tauri-apps/plugin-dialog | **2.8.4** |
+| @tauri-apps/plugin-autostart | **2.7.0** |
+
+> `@tauri-apps/api`/`cli` 是 2.12.4、Rust tauri 是 2.12.5，不会报 mismatch——CLI 只比 major.minor。
+
+- **全部写死，不留下限**：应用类项目的 `Cargo.toml` 一律 `=x.y.z`（`tauri = { version = "=2.12.5", features = [...] }`、`tauri-build = "=2.7.4"`、插件与工具库同理）；npm 安装时加 `--save-exact`，`package.json` 里不出现 `^`。理由：`^` 只是「重解析时不低于」，挡不住往上漂；多个项目共用 `CARGO_TARGET_DIR` 时，任何一次 `cargo update` 让某个项目漂到另一个 patch，都会在共享 target 里多留一整份 tauri 栈。
+- **`Cargo.lock` 仍然必须入库**（不写进 `.gitignore`）：manifest 写死决定「解析结果只能是哪一版」，lock 决定「这次构建实际用哪一版」；只写死 manifest 而丢 lock，新增依赖触发重解析时仍可能发生变化。
+- **升级是「多个项目一起改」的动作**：改三处 manifest 的精确版本 → 每个项目 `cargo update` 让 lock 跟上 → 各自构建验证；只改一个项目会让共享 target 同时存在两套 tauri。
+- **feature 必须与 `tauri.conf.json` 一致**：`protocol-asset` 仅在 `app.security.assetProtocol.enable = true` 时才能开，否则 `tauri-build` 直接失败并提示 `does not match the allowlist defined under tauri.conf.json`；只给真正用 `asset:` 协议的项目开（paim 开，cdown/dnote 不开），**不要为了共享 target 强行对齐 feature**。
+- **升级方式与连锁**：`cargo update -p tauri --precise <目标版本>`（写死后通常是同值，等于只刷传递依赖）；tauri 前移会连带 wry / tao / windows 同批前移，属正常现象，不要手改 `Cargo.lock`。
+- **直接依赖 `windows` 的版本跟着 tauri 走**：paim 用 `windows` 调 Shell API 定位文件，声明与 tauri 依赖的 windows 同 minor（当前 `=0.62.2`），否则同一 crate 会被编两份；升级 tauri 后用 `cargo tree -i windows` 核对只剩一份。
+- **npm 侧同样写死**：`pnpm add --save-exact @tauri-apps/api@2.12.4`、`pnpm add -D --save-exact @tauri-apps/cli@2.12.4`；插件包必须与 Rust crate **major.minor 完全一致**（dialog 双侧 2.8.4），写 `^2.8.4` 以后可能装到 2.9.x 又触发 CLI 的 mismatch 报错。
 
 ## 2. 目录与分层（建议统一）
 
@@ -217,7 +251,7 @@ app.asset_protocol_scope().allow_directory(db::temp_dir(app.handle()), true)?;
 - paim 另有一份 `src-tauri/tauri.e2e.conf.json`，内容只有 `build.devUrl = http://localhost:1430`，**当前仓库里没有任何引用**（e2e 用内嵌前端跑、不需要 devServer）——新项目**可以不要**它。
 - **tauri-build ≥2.7 起 `STATIC_VCRUNTIME` 环境变量通道废弃**：静态链接 VC 运行时改在配置里声明 `"build": { "windows": { "staticVCRuntime": true } }`（默认即 true，显式写只固定意图）；paim 从未依赖该变量，升级后无废弃警告、无需迁移，但老项目升到 ≥2.7 时会撞上这个告警。
 - **2.12 CLI 构建时打印的 `Removed unused commands from ...` 不是告警**：那是 `build.removeUnusedCommands: true` 的正常代码生成输出（2.12 CLI 新增的打印），别当错误去排查。
-- 特性开关在 `Cargo.toml` 侧：paim 开 `tauri` 的 `protocol-asset` 与 `tray-icon`；不用托盘就别开 `tray-icon`。
+- 特性开关在 `Cargo.toml` 侧：paim 开 `tauri` 的 `protocol-asset` 与 `tray-icon`；不用托盘就别开 `tray-icon`。`protocol-asset` **必须**与本节配置的 `app.security.assetProtocol.enable = true` 同时存在，否则 `tauri-build` 直接报 `... does not match the allowlist defined under tauri.conf.json`（cdown/dnote 曾因只加 feature、没配 assetProtocol 撞过）；不用 `asset:` 的项目就不要开这个 feature。
 
 ## 6. capabilities 权限（建议统一）
 
@@ -253,7 +287,7 @@ app.asset_protocol_scope().allow_directory(db::temp_dir(app.handle()), true)?;
 
 **「什么时候跳过单例/热键」的判断依据，建议统一成「实例标识环境变量是否存在」**（paim 用 `PAIM_DATA_DIR`）：`if std::env::var("PAIM_DATA_DIR").is_err() { /* 注册单例与热键 */ }`。这样 e2e/多实例启动不会互相踢掉，也不必为测试写第二套代码。
 
-- **插件的两侧版本保持同 minor**：有 npm 对应包的插件，npm 包与 Rust crate 用同一 minor（paim 的 dialog 双侧都是 2.7.2）；`pnpm dev` 启动时 CLI 会列出所有不匹配项，按提示 `pnpm add @tauri-apps/plugin-xxx@~<crate版本>` 对齐即可。无 npm 侧对应包的（`tauri-plugin-log` / `global-shortcut` / `single-instance`）跟随其 crate 版本，不参与两侧对齐。
+- **插件的两侧版本写死且完全一致**：有 npm 对应包的插件，npm 包与 Rust crate 用**同一个精确版本**（paim 的 dialog 双侧都是 `2.8.4`）；安装/对齐一律 `pnpm add --save-exact @tauri-apps/plugin-xxx@<crate版本>`，不要用 `~` / `^`。`pnpm dev` 启动时 CLI 会列出所有不匹配项，按提示改成精确版本即可。无 npm 侧对应包的（`tauri-plugin-log` / `global-shortcut` / `single-instance` / `window-state`）跟随其 crate 版本，不参与两侧对齐；也不要为了对齐去安装用不到的 JS 包（装了才会被校验）。
 
 ## 8. 日志与配置（建议统一）
 
@@ -388,7 +422,7 @@ dist/
 - [ ] `package.json`：pnpm pin 版本、`type` 为 module、scripts 照抄（改名）、依赖按需裁剪
 - [ ] `pnpm-workspace.yaml`：`allowBuilds` / `onlyBuiltDependencies`
 - [ ] 根 `Cargo.toml`：workspace + `[profile.release]` 体积优化段
-- [ ] `src-tauri/Cargo.toml`：`[lib]` 独立 crate 名、`tauri 2.12.0` / `tauri-build 2.7.0`（与 `@tauri-apps/api`、`cli` 2.12.0 对齐）、tauri 特性、直接依赖 `windows` 与 tauri 同 minor（0.62）、specta 三件套精确版本；`Cargo.lock` 入库（不写进 `.gitignore`）
+- [ ] `src-tauri/Cargo.toml`：`[lib]` 独立 crate 名、`tauri = "=2.12.5"` / `tauri-build = "=2.7.4"`（与 `@tauri-apps/api`、`cli` 的 `2.12.4` 对齐）、tauri 特性（`tray-icon` 必开；`protocol-asset` 仅当配置启用 `assetProtocol`）、直接依赖 `windows = "=0.62.2"`、插件与 specta 三件套全部 `=x.y.z`；`Cargo.lock` 入库（不写进 `.gitignore`）
 - [ ] Rust 模块组织：同名 `.rs` + 同名目录（**不用 `mod.rs`**），子模块声明写在同名文件里
 - [ ] 测试文件命名：Rust `*.test.rs`（源文件末尾 `#[path]` 声明）、前端 `*.test.ts`、e2e `序号-<功能>-<介词>-<页面>.spec.ts`（序号不复用）
 - [ ] `specta_builder()` + 两条导出路径（导出即退 / debug 启动）+ `scripts/gen-bindings.mjs`
