@@ -22,7 +22,7 @@
 | 环境变量前缀 | `PAIM_*`、`VITE_PORT`、`TAURI_DEV_HOST` | 可不同（换自己的前缀） |
 | 应用标识 | `productName` / `identifier` / 窗口标题尺寸 / bundle targets / 图标 | 可不同 |
 | 前端栈 | Vue 3 + TS + Tailwind 3 + vite 6 + vue-router | 可不同（换框架时保留工程约定） |
-| 质量门 | `pnpm quick`（日常：format:check → lint → **lint:e2e-locators** → typecheck → check:rs → test:compile，<10s）；`pnpm check`（收尾：format → build:rs → gen:bindings → lint → **lint:e2e-locators** → typecheck → **test** → build） | 建议统一 |
+| 质量门 | `pnpm quick`（日常只读校验，<10s）；`pnpm check`（收尾全量，含 bindings 复写）；步骤与顺序见 paim 的 `package.json` | 建议统一 |
 | 测试 | vitest + cargo test + Playwright(CDP) 三层 | 建议统一 |
 | 命令执行 | PowerShell 7（`&&` / `||` 可用） | 建议统一 |
 
@@ -188,8 +188,8 @@ const exe = path.join(targetDir, "debug", "paim.exe");
 spawnSync(exe, { env: { ...process.env, PAIM_EXPORT_BINDINGS: "1" }, timeout: 10_000 });
 ```
 
-- 登记了命令/事件却忘了跑导出，症状是「编译通过但前端没有这个命令」——把导出挂进 `pnpm check`（paim 的 `check` = `format → build:rs → gen:bindings → lint → typecheck → test → build`）就不会漏。
-- 改了 Rust 命令签名后，必须重跑 `pnpm check`（或 `pnpm dev`）让 `src/bindings.ts` 复写；验证时 **grep warning 与 error 双查**。
+- 登记了命令/事件却忘了跑导出，症状是「编译通过但前端没有这个命令」——把导出挂进 `pnpm check`（paim 的 `check` 已含 `gen:bindings`，完整步骤见 paim 的 `package.json`）就不会漏。
+- 改了 Rust 命令签名 / 公共 API 后，单独跑 `pnpm build:rs && pnpm gen:bindings` 复写 `src/bindings.ts`（与 `quick` / `check` 相互独立；`pnpm dev` 也会导出）；验证时 **grep warning 与 error 双查**。
 
 ## 5. tauri.conf.json（逐项约定，含片段）
 
@@ -347,15 +347,15 @@ paim 的 `package.json` scripts（可直接照搬，只改项目名字符串）�
 | `lint:e2e-locators` | `node scripts/check-e2e-locators.mjs`（e2e 名称定位缺 `exact` 即失败；`--fix` 自动补、`--all` 查看页面级历史欠账） |
 | `check:rs` | `cargo check --manifest-path src-tauri/Cargo.toml` |
 | `test:compile` | `cargo test --no-run --manifest-path src-tauri/Cargo.toml`（只编译测试） |
-| `quick` | 编排：`format:check → lint → lint:e2e-locators → typecheck → check:rs → test:compile`（日常，<10s） |
 | `format` / `format:check` | oxfmt + cargo fmt（check 版加 `--check`） |
 | `test` / `test:ui` / `test:rs` | `pnpm test:ui && pnpm test:rs` / `vitest run` / `cargo test --manifest-path src-tauri/Cargo.toml` |
 | `e2e` | `playwright test --config e2e/playwright.config.ts` |
-| `check` | `format → build:rs → gen:bindings → lint → lint:e2e-locators → typecheck → test → build` |
+| `quick` | 编排：日常只读校验，<10s；步骤见 paim 的 `package.json` |
+| `check` | 全量校验（含 `gen:bindings` 复写），步骤与顺序见 paim 的 `package.json` |
 
 - **分工（一句话）**：`quick` = 改代码过程中的**只读**体检（不改任何文件、不产 exe、不跑测试，秒级）；`check` = **提交前唯一出口**（会改文件：oxfmt 重排 + `gen:bindings` 复写 `src/bindings.ts`；会跑 `test` 与 `build`）。
 - **收尾只跑 `check`**：它是 `quick` 的超集（`format` ⊃ `format:check`、`build:rs` ⊃ `check:rs`），所以收尾不必先跑 `quick`，也不必再单独跑 `gen:bindings`——`check` 成功即意味着 bindings 已是最新。
-- **日常只跑 `quick`，但它不能替代 `check`**：不跑 `test` / `build`、不复写 bindings。唯一需要手动插一步的场景是「改了 Rust 命令签名 / 公共 API，却只想跑 `quick`」→ 先 `pnpm build:rs && pnpm gen:bindings`：`quick` 只做 `cargo check`（不产 exe），而 gen 依赖最新的 debug 二进制，否则会**静默写出旧 bindings**。
+- **日常只跑 `quick`，但它不能替代 `check`**：不跑 `test` / `build`、不复写 bindings。**改签名 / 公共 API 是独立动作**：单独跑 `pnpm build:rs && pnpm gen:bindings`，不因此改跑 `check`，也不依附 `quick`；`quick` 只做 `cargo check`（不产 exe），而 gen 依赖最新的 debug 二进制，否则会**静默写出旧 bindings**。
 - `test` 里前端在前（快、先失败早停），Rust 测试在后。
 - **`lint:e2e-locators` 是 e2e 的静态门**：Playwright 的名称匹配（`getByRole` 的 `name`、`getByText/Title/Label/AltText/Placeholder`）默认是**子串**，两个详情弹窗共用一套按钮名时必然互相吞并（`收藏` ⊂ `取消收藏`、`关闭` ⊂ `关闭查找`、`提示词内容` ⊂ `以提示词内容搜索相似项`），既会误红也会误绿。脚本默认只查详情作用域（变量名白名单），`--all` 看页面级历史欠账；确需子串的调用在该行注释 `locator-allow-substring` 豁免。落地顺序：先 `--fix` 一次性补 `exact`（改完跑全量 e2e），再挂进 `quick` / `check` 防回退。实现见 paim `scripts/check-e2e-locators.mjs`。
 
