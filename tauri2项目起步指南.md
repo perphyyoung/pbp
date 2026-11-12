@@ -24,7 +24,7 @@
 | 前端栈 | Vue 3 + TS + Tailwind 3 + vite 6 + vue-router | 可不同（换框架时保留工程约定） |
 | 质量门 | `pnpm quick`（日常只读校验，<10s）；`pnpm check`（收尾全量，含 bindings 复写）；步骤与顺序见 paim 的 `package.json` | 建议统一 |
 | 测试 | vitest + cargo test + Playwright(CDP) 三层 | 建议统一 |
-| 命令执行 | PowerShell 7（`&&` / `||` 可用） | 建议统一 |
+| 命令执行 | PowerShell 7（`&&` 可用） | 建议统一 |
 
 ## 1. 版本与包管理（建议统一）
 
