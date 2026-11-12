@@ -21,7 +21,7 @@
 | 日志 | 自研 `infra/logging.rs` 写文件（`paim.log`）+ 配置文件分级（`paim-config.toml`） | 建议统一 |
 | 环境变量前缀 | `PAIM_*`、`VITE_PORT`、`TAURI_DEV_HOST` | 可不同（换自己的前缀） |
 | 应用标识 | `productName` / `identifier` / 窗口标题尺寸 / bundle targets / 图标 | 可不同 |
-| 前端栈 | Vue 3 + TS + Tailwind 3 + vite 6 + vue-router | 可不同（换框架时保留工程约定） |
+| 前端栈 | Vue 3 + TS 6 + Tailwind 3 + Vite 8 + vue-router | 可不同（换框架时保留工程约定） |
 | 质量门 | `pnpm quick`（日常只读校验，<10s）；`pnpm check`（收尾全量，含 bindings 复写）；步骤与顺序见 paim 的 `package.json` | 建议统一 |
 | 测试 | vitest + cargo test + Playwright(CDP) 三层 | 建议统一 |
 | 命令执行 | PowerShell 7（`&&` 可用） | 建议统一 |
@@ -33,7 +33,8 @@
 - Node：`package.json` 里不必写 `engines`；Node ≥ 22.13 只在使用 npm 安装 pnpm 时需要（pnpm 12 自身不依赖 Node）。
 - **版本号只维护一处**：`package.json.version`；`tauri.conf.json` 用 `"version": "../package.json"` 引用它（paim 做法）。`src-tauri/Cargo.toml` 的 `version` 不参与发布，paim 里长期是初始值 `0.1.0`，保持一致即可。
 - 改版本号后**必须重启 vite**：paim 的 vite watch 白名单不含 `package.json`，否则前端 `__APP_VERSION__` 仍是旧值。
-### 1.1 当前版本基线（2026-10-28 实测，三个项目已对齐；全部写死）
+
+### 1.1 当前版本基线（2026-11-12 实测，三个项目已对齐；全部写死）
 
 Rust（`src-tauri/Cargo.toml`，一律 `=x.y.z`）：
 
@@ -65,6 +66,20 @@ npm（`package.json`，不带 `^`）：
 | @tauri-apps/plugin-autostart | **2.7.0** |
 
 > `@tauri-apps/api`/`cli` 是 2.12.4、Rust tauri 是 2.12.5，不会报 mismatch——CLI 只比 major.minor。
+
+前端工具链（2026-11-12 对齐）：
+
+| 包 | 版本 |
+| --- | --- |
+| vite | **8.3.6** |
+| @vitejs/plugin-vue | **6.0.10** |
+| typescript | **6.0.3** |
+| vue-tsc | **3.3.14** |
+| vitest | **5.1.0** |
+| @playwright/test | **1.65.0** |
+
+- Rust toolchain：**1.99.1**（2026-10-13），三项目已统一。
+- TypeScript 7 暂不升级：原生编译器重写，Vue 工具链要等 TS 7.1 恢复 Compiler API 后再跟进。
 
 - **全部写死，不留下限**：应用类项目的 `Cargo.toml` 一律 `=x.y.z`（`tauri = { version = "=2.12.5", features = [...] }`、`tauri-build = "=2.7.4"`、插件与工具库同理）；npm 安装时加 `--save-exact`，`package.json` 里不出现 `^`。理由：`^` 只是「重解析时不低于」，挡不住往上漂；多个项目共用 `CARGO_TARGET_DIR` 时，任何一次 `cargo update` 让某个项目漂到另一个 patch，都会在共享 target 里多留一整份 tauri 栈。
 - **`Cargo.lock` 仍然必须入库**（不写进 `.gitignore`）：manifest 写死决定「解析结果只能是哪一版」，lock 决定「这次构建实际用哪一版」；只写死 manifest 而丢 lock，新增依赖触发重解析时仍可能发生变化。
@@ -131,7 +146,7 @@ specta-typescript = "=0.0.12"
 前端类型检查依赖（paim 当前）：
 
 - `typescript`: `6.0.3`
-- `vue-tsc`: `3.3.13`（与 TS 大版本同代升级，升级后先跑 `pnpm check`）
+- `vue-tsc`: `3.3.14`（与 TS 大版本同代升级，升级后先跑 `pnpm check`）
 
 ### 4.2 单一声明表 + 运行期导出（paim 路线）
 
