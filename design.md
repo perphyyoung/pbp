@@ -51,3 +51,23 @@
 ```
 
 这样基本一次到位，能少来回改好几轮。
+
+## 字体与字号
+
+### 字体栈
+
+- 中文优先的系统字体：`"Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", …`；不引入 Web 字体，避免加载期字体切换。
+- 不设 `-webkit-font-smoothing: antialiased`：Windows 下小字反而更糊。
+
+### 字号
+
+- 字号一律用 rem（如 `text-xs` / `text-sm`），不写 `text-[11px]` 这类像素值，跟随用户缩放。
+- 正文下限 0.75rem（12px）；表单、设置类页面的主内容用 0.875rem（14px）。
+- 行高用无单位数值；不靠固定像素高度装文字，文字变大时容器要能长高。
+
+### 深色界面
+
+- 在 `:root` 声明 `color-scheme: dark`，滚动条、日期选择器、原生控件跟随深色。
+- 正文与次要文字对比度 ≥ 4.5:1：深底下次要标签用 slate-400，不用 slate-500。
+- 控件边界（输入框、按钮）对背景 ≥ 3:1：深底下用 slate-600，不用 slate-700。
+- `placeholder` 可以低于 4.5:1，它只是提示不是内容。
